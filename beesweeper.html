@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BeeSweeper 🐝</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #fff8dc;
+            background-image:
+                    radial-gradient(circle at 10px 10px, #ffec80 96%, transparent 100%),
+                    radial-gradient(circle at 40px 40px, #ffec80 96%, transparent 100%);
+            background-size: 60px 60px;
+            font-family: 'Trebuchet MS', sans-serif;
+            user-select: none;
+            text-align: center;
+        }
+        #menu {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(255, 248, 220, 0.95);
+            z-index: 5;
+        }
+        #menu h1 {
+            font-size: 3rem;
+            color: #a86f00;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px #fff3b0;
+        }
+        .btn {
+            background: #ffda44;
+            border: 2px solid #a86f00;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-size: 1.3rem;
+            margin: 8px;
+            cursor: pointer;
+            box-shadow: 2px 2px #a86f00;
+        }
+        .btn:hover { background: #ffe066; }
+        #hud {
+            display:flex;
+            justify-content: space-between;
+            align-items: center;
+            color:#a86f00;
+            font-size:1.2rem;
+            padding: 5px 15px;
+            background: rgba(255,255,255,0.8);
+            border-bottom: 3px solid #d4a017;
+        }
+        canvas {
+            display:block;
+            margin:auto;
+            cursor: pointer;
+            background: rgba(255, 245, 186, 0.85);
+            border: 5px solid #d4a017;
+            border-radius: 12px;
+        }
+        #scoreboard {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 1rem;
+            color: #a86f00;
+            background: rgba(255,255,255,0.7);
+            padding: 8px;
+            border-radius: 6px;
+        }
+        .ad-slot {
+            margin: 10px auto;
+            text-align: center;
+            min-height: 60px;
+            width: 100%;
+            max-width: 900px;
+            background: #fff3b0;
+            border: 1px dashed #a86f00;
+            color: #a86f00;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+        }
+        /* 📱 Hide some ads on mobile */
+        @media (max-width: 700px) {
+            .hide-on-mobile { display: none !important; }
+            canvas { max-width: calc(100% - 20px); height: auto; }
+        }
+    </style>
+</head>
+<body>
+<div id="menu">
+    <h1>🐝 BeeSweeper 🐝</h1>
+
+    <!-- Menu Top Ad -->
+    <div class="ad-slot">
+        AD PLACEHOLDER (Menu Top)
+        <!-- YOUR ADSENSE CODE -->
+    </div>
+
+    <button class="btn" onclick="startGame('easy')">Easy</button>
+    <button class="btn" onclick="startGame('medium')">Medium</button>
+    <button class="btn" onclick="startGame('hard')">Hard</button>
+
+    <div id="scoreboard"></div>
+
+    <!-- Menu Bottom Ad -->
+    <div class="ad-slot hide-on-mobile">
+        AD PLACEHOLDER (Menu Bottom)
+        <!-- YOUR ADSENSE CODE -->
+    </div>
+</div>
+
+<div id="hud" style="display:none;">
+    <div>Bees 🐝: <span id="beeCount">0</span></div>
+    <div>⏱ <span id="timer">0</span>s</div>
+    <div>
+        <button class="btn" style="padding:2px 6px;font-size:1rem;" onclick="restartGame()">Restart</button>
+        <button class="btn" style="padding:2px 6px;font-size:1rem;" onclick="backToMenu()">Menu</button>
+    </div>
+</div>
+
+<!-- Above Game Ad -->
+<div class="ad-slot">
+    AD PLACEHOLDER (Above Game)
+    <!-- YOUR ADSENSE CODE -->
+</div>
+
+<canvas id="game" width="900" height="650"></canvas>
+
+<!-- Below Game Ad -->
+<div class="ad-slot hide-on-mobile">
+    AD PLACEHOLDER (Below Game)
+    <!-- YOUR ADSENSE CODE -->
+</div>
+
+<script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    let rows, cols, beeCount, hexSize;
+    let grid = [], gameOver=false, revealedCount=0, flagsPlaced=0;
+    let buzzBees=[], particles=[], honeyDrops=[];
+    let startTime=null, timerInterval=null;
+    let gameState='menu', currentDiff='custom';
+
+    // Sounds
+    const beeBuzzSound = new Audio("https://cdn.pixabay.com/download/audio/2023/03/16/audio_80d1739743.mp3?filename=bee-z-buzz-14428.mp3");
+    const clickSound   = new Audio("https://cdn.pixabay.com/download/audio/2022/03/15/audio_adebbf3b8d.mp3?filename=click-124467.mp3");
+    const winSound     = new Audio("https://cdn.pixabay.com/download/audio/2022/03/15/audio_a0f1c53431.mp3?filename=success-1-6297.mp3");
+
+    function showScoreboard(){
+        let sbHTML = "<strong>Best Times:</strong><br>";
+        ['easy','medium','hard'].forEach(d=>{
+            let t = localStorage.getItem("beesweeper_best_"+d);
+            sbHTML += d.charAt(0).toUpperCase()+d.slice(1)+": "+(t? t+"s":"—")+"<br>";
+        });
+        document.getElementById('scoreboard').innerHTML = sbHTML;
+    }
+    showScoreboard();
+
+    function calcHexSize(rows, cols) {
+        const marginX = 120, marginY = 120;
+        let maxHexW = (canvas.width - marginX) / (cols * 1.5 + 0.5);
+        let maxHexH = (canvas.height - marginY) / ((rows + 0.5) * Math.sqrt(3));
+        return Math.floor(Math.min(maxHexW, maxHexH));
+    }
+
+    function startGame(difficulty){
+        currentDiff=difficulty;
+        if(difficulty==='easy'){ rows=8; cols=8; beeCount=10; }
+        if(difficulty==='medium'){ rows=12; cols=12; beeCount=20; }
+        if(difficulty==='hard'){ rows=16; cols=16; beeCount=40; }
+        hexSize = calcHexSize(rows, cols);
+        begin();
+    }
+
+    function begin(){
+        document.getElementById('menu').style.display='none';
+        document.getElementById('hud').style.display='flex';
+        gameOver=false; gameState='playing';
+        flagsPlaced=0;
+        document.getElementById('beeCount').textContent = beeCount;
+        document.getElementById('timer').textContent = '0';
+        createGrid();
+        startTime = Date.now();
+        clearInterval(timerInterval);
+        timerInterval = setInterval(()=> {
+            document.getElementById('timer').textContent = Math.floor((Date.now()-startTime)/1000);
+        },500);
+    }
+
+    function createGrid() {
+        grid=[]; revealedCount=0; buzzBees=[]; particles=[]; honeyDrops=[];
+        for (let r = 0; r < rows; r++) {
+            let row = [];
+            for (let c = 0; c < cols; c++) {
+                row.push({bee:false,revealed:false,flagged:false,adjacent:0});
+            }
+            grid.push(row);
+        }
+        let placed=0;
+        while (placed<beeCount) {
+            let r = Math.floor(Math.random()*rows);
+            let c = Math.floor(Math.random()*cols);
+            if (!grid[r][c].bee) { grid[r][c].bee=true; placed++; }
+        }
+        calcAdj();
+        for (let i=0;i<10;i++){
+            honeyDrops.push({x: Math.random()*canvas.width, y:Math.random()*-200, speed: 1+Math.random()*2});
+        }
+    }
+
+    function neighbors(r,c){
+        let list=[];
+        if (c % 2 === 0) {
+            var offsets = [[+1,0],[+1,-1],[0,-1],[-1,-1],[-1,0],[0,+1]];
+        } else {
+            var offsets = [[+1,+1],[+1,0],[0,-1],[-1,0],[-1,+1],[0,+1]];
+        }
+        for (let [dc,dr] of offsets){
+            let nc = c+dc, nr = r+dr;
+            if (nr>=0 && nr<rows && nc>=0 && nc<cols) list.push([nr,nc]);
+        }
+        return list;
+    }
+
+    function calcAdj(){
+        for (let r=0; r<rows; r++){
+            for (let c=0; c<cols; c++){
+                let count=0;
+                for (let [nr,nc] of neighbors(r,c)){ if(grid[nr][nc].bee) count++; }
+                grid[r][c].adjacent = count;
+            }
+        }
+    }
+
+    function drawHex(x, y, size, fill){
+        ctx.beginPath();
+        for (let i=0;i<6;i++){
+            const ang = Math.PI/180*(60*i-30);
+            const px = x+size*Math.cos(ang);
+            const py = y+size*Math.sin(ang);
+            i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+        }
+        ctx.closePath();
+        ctx.fillStyle=fill; ctx.fill();
+        ctx.strokeStyle="#a67c00"; ctx.stroke();
+    }
+
+    function numColor(n){
+        const colors = [null,"#0000cc","#228B22","#B22222","#6A0DAD","#FF4500","#2F4F4F"];
+        return colors[n] || "#000";
+    }
+
+    function reveal(r,c){
+        let cell = grid[r][c];
+        if (cell.revealed || cell.flagged) return;
+        cell.revealed = true;
+        revealedCount++;
+        if (cell.bee) {
+            gameOver=true; buzzBees.push({r:r,c:c,angle:0,dir:1});
+            revealAllBees(); beeBuzzSound.play(); endGame(false);
+            return;
+        } else clickSound.play();
+        if (cell.adjacent === 0) {
+            for (let [nr,nc] of neighbors(r,c)) reveal(nr,nc);
+        }
+        checkWin();
+    }
+
+    function revealAllBees(){
+        for (let r=0;r<rows;r++)
+            for (let c=0;c<cols;c++)
+                if (grid[r][c].bee){
+                    grid[r][c].revealed=true;
+                    buzzBees.push({r:r,c:c,angle:0,dir:1});
+                }
+    }
+
+    function checkWin(){
+        if (revealedCount === rows*cols - beeCount) {
+            gameOver=true; winSound.play(); spawnPollen(); endGame(true);
+        }
+    }
+
+    function endGame(won){
+        clearInterval(timerInterval);
+        if (won){
+            let timeTaken = Math.floor((Date.now()-startTime)/1000);
+            let best = localStorage.getItem("beesweeper_best_"+currentDiff);
+            if (!best || timeTaken < best) localStorage.setItem("beesweeper_best_"+currentDiff, timeTaken);
+        }
+        setTimeout(()=>{backToMenu();},2000);
+    }
+
+    function spawnPollen(){
+        for (let i=0;i<100;i++){
+            particles.push({x:canvas.width/2,y:canvas.height/2,vx:(Math.random()-0.5)*5,vy:(Math.random()-1)*5,color:Math.random()>0.5? "#fdf5c9":"#ffec80",life:100});
+        }
+    }
+
+    function updateAnimations(){
+        buzzBees.forEach(bee=>{
+            bee.angle += bee.dir * 3;
+            if (Math.abs(bee.angle) > 10) bee.dir *= -1;
+        });
+        particles.forEach(p=>{p.x+=p.vx; p.y+=p.vy; p.vy+=0.05; p.life--;});
+        particles = particles.filter(p=>p.life>0);
+        honeyDrops.forEach(h=>{h.y+=h.speed; if(h.y>canvas.height+20){h.y=-20; h.x=Math.random()*canvas.width;}});
+    }
+
+    function draw(){
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle="#ffbf00";
+        honeyDrops.forEach(h=>{ctx.beginPath(); ctx.arc(h.x,h.y,10,0,Math.PI*2); ctx.fill();});
+        for (let r=0;r<rows;r++){
+            for (let c=0;c<cols;c++){
+                const x = c*hexSize*1.5+60;
+                const y = r*Math.sqrt(3)*hexSize+60+(c%2? Math.sqrt(3)/2*hexSize:0);
+                let cell = grid[r][c];
+                if (!cell.revealed) {
+                    drawHex(x,y,hexSize,"#ffda44");
+                    if (cell.flagged) {ctx.font="22px serif"; ctx.fillText("🍯",x-12,y+8);}
+                } else {
+                    drawHex(x,y,hexSize,"#fff2b2");
+                    if (cell.bee) {
+                        const beeAnim = buzzBees.find(b=>b.r==r && b.c==c);
+                        if (beeAnim) {
+                            ctx.save(); ctx.translate(x,y);
+                            ctx.rotate(beeAnim.angle*Math.PI/180);
+                            ctx.font="20px serif"; ctx.fillText("🐝",-12,8);
+                            ctx.restore();
+                        } else ctx.fillText("🐝",x-12,y+8);
+                    } else if (cell.adjacent>0) {
+                        ctx.font="bold 18px Trebuchet MS";
+                        ctx.fillStyle = numColor(cell.adjacent);
+                        ctx.fillText(cell.adjacent,x-5,y+6);
+                    }
+                }
+            }
+        }
+        particles.forEach(p=>{ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill();});
+    }
+
+    canvas.addEventListener('click', e=>{
+        if (gameState!=='playing' || gameOver) return;
+        const [r,c]=getCellFromMouse(e.offsetX,e.offsetY);
+        if (r!=null) reveal(r,c);
+    });
+
+    canvas.addEventListener('contextmenu', e=>{
+        e.preventDefault();
+        if (gameState!=='playing' || gameOver) return;
+        const [r,c]=getCellFromMouse(e.offsetX,e.offsetY);
+        if (r!=null) {
+            let cell = grid[r][c];
+            if (!cell.revealed) {
+                cell.flagged = !cell.flagged;
+                flagsPlaced += cell.flagged ? 1 : -1;
+                document.getElementById('beeCount').textContent = beeCount - flagsPlaced;
+            }
+        }
+    });
+
+    function getCellFromMouse(mx,my){
+        for (let r=0;r<rows;r++){
+            for (let c=0;c<cols;c++){
+                const x = c*hexSize*1.5+60;
+                const y = r*Math.sqrt(3)*hexSize+60+(c%2? Math.sqrt(3)/2*hexSize:0);
+                ctx.beginPath();
+                for (let i=0;i<6;i++){
+                    const ang = Math.PI/180*(60*i-30);
+                    const px = x+hexSize*Math.cos(ang);
+                    const py = y+hexSize*Math.sin(ang);
+                    i===0? ctx.moveTo(px,py): ctx.lineTo(px,py);
+                }
+                ctx.closePath();
+                if (ctx.isPointInPath(mx,my)) return [r,c];
+            }
+        }
+        return [null,null];
+    }
+
+    function restartGame(){ begin(); }
+    function backToMenu(){
+        gameState='menu';
+        document.getElementById('menu').style.display='flex';
+        document.getElementById('hud').style.display='none';
+        clearInterval(timerInterval); showScoreboard();
+    }
+
+    function gameLoop(){
+        if (gameState==='playing') updateAnimations();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+</script>
+</body>
+</html>
